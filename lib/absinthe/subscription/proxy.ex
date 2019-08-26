@@ -4,10 +4,13 @@ defmodule Absinthe.Subscription.Proxy do
   use GenServer
 
   defstruct [
-    :pubsub
+    :pubsub,
+    :node
   ]
 
   alias Absinthe.Subscription
+
+  @gc_interval 5_000
 
   def start_link(pubsub, shard) do
     GenServer.start_link(__MODULE__, {pubsub, shard})
@@ -16,11 +19,19 @@ defmodule Absinthe.Subscription.Proxy do
   def topic(shard), do: "__absinthe__:proxy:#{shard}"
 
   def init({pubsub, shard}) do
+    node_name = pubsub.node_name()
     :ok = pubsub.subscribe(topic(shard))
-    {:ok, %__MODULE__{pubsub: pubsub}}
+    Process.send_after(self(), :gc, @gc_interval)
+    {:ok, %__MODULE__{pubsub: pubsub, node: node_name}}
   end
 
-  def handle_info(%{node: src_node}, state) when src_node == node() do
+  def handle_info(%{node: src_node}, %{node: node} = state) when src_node == node do
+    {:noreply, state}
+  end
+
+  def handle_info(:gc, state) do
+    :erlang.garbage_collect()
+    Process.send_after(self(), :gc, @gc_interval)
     {:noreply, state}
   end
 
